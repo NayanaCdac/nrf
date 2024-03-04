@@ -10,34 +10,13 @@ on:
   push:
     branches:
       - master
+  repository_dispatch:
+    types: [trigger-workflow]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Build
-        run: go build
-
-  unit-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Unit tests
-        run: go test ./...
-
   lint:
-    runs-on: ubuntu-latest
+    name: lint
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -50,21 +29,77 @@ jobs:
         with:
           version: latest
           args: -v --config ./.golangci.yml
-
+    
   license-check:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    needs: lint
     steps:
       - uses: actions/checkout@v4
 
       - name: reuse lint
-        uses: fsfe/reuse-action@v3
+        uses: fsfe/reuse-action@v2
 
   fossa-check:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    needs: license-check
     steps:
       - uses: actions/checkout@v4
 
       - name: FOSSA scan
         uses: fossa-contrib/fossa-action@v3
         with:
-          fossa-api-key: 0c3bbcdf20e157bbd487dae173751b28
+          fossa-api-key: 0c3bbcdf20e157bbd487dae173751b28      
+        
+  build:
+    runs-on: self-hosted
+    needs: fossa-check
+    # needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build
+        run: go build
+
+  unit-tests:
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Unit tests
+        run: go test ./...
+        
+  docker-build:
+    runs-on: self-hosted
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+              
+      - uses: docker/setup-buildx-action@v3.0.0
+      
+      - name: Build Docker image
+        run: make docker-build
+
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME  }}" --password-stdin
+
+      - name: Tag Docker image
+        run: docker tag 5gc-nrf:0.0.1-dev nayanacdac/nrf
+
+      - name: Push Docker image to Docker Hub
+        run: docker push nayanacdac/nrf
+            
+
+          
